@@ -53,7 +53,7 @@
     ]
   },
   "env": {
-    "DJANGO_SETTINGS_MODULE": "config.settings.dev"
+    "DJANGO_SETTINGS_MODULE": "config.settings.local"
   },
   "hooks": {
     "PreToolUse": [

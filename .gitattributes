@@ -1,0 +1,13 @@
+# Finales de línea.
+#
+# El repositorio se trabaja desde carpetas sincronizadas con OneDrive, que
+# convierte los archivos a CRLF. En la mayoría de los casos eso es sólo ruido
+# —`git status` marca cientos de archivos como modificados sin un solo cambio
+# real—, pero en los scripts de shell no: bash falla al interpretar un `.sh`
+# con CRLF, y como `.claude/settings.json` engancha los hooks de
+# `.claude/hooks/` a Bash, Write y Edit, el error deja bloqueada cualquier
+# llamada a la terminal desde el proyecto, incluso un `ls`.
+#
+# Esta regla obliga a LF en los scripts, del lado del repositorio, para que el
+# arreglo no dependa de cómo tenga configurado git cada persona.
+*.sh text eol=lf
