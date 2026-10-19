@@ -149,14 +149,16 @@ class Command(BaseCommand):
         return len(users)
 
     def _leads(self, rng) -> int:
-        leads = list(Lead.objects.order_by('created_at', 'id'))
+        # all_objects y no objects: el manager por defecto oculta los leads con
+        # soft-delete (deleted_at), y esos también tienen datos personales.
+        leads = list(Lead.all_objects.order_by('created_at', 'id'))
         for n, lead in enumerate(leads, start=1):
             first, last = fake_name(rng)
             lead.name = f'{first} {last}'
             lead.email = f'lead{n}@staging.test'
             lead.phone = fake_phone(5_000_000 + n)
             lead.discard_detail = ''
-        Lead.objects.bulk_update(leads, ['name', 'email', 'phone', 'discard_detail'])
+        Lead.all_objects.bulk_update(leads, ['name', 'email', 'phone', 'discard_detail'])
         return len(leads)
 
     def _payments(self, rng, placeholder) -> int:

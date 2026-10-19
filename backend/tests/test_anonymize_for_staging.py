@@ -108,6 +108,14 @@ class TestAnonymization:
         interaction = Interaction.objects.get()
         assert interaction.notes == '' and interaction.next_action == ''
 
+    def test_soft_deleted_leads_are_anonymized_too(self, staging_env, populated):
+        borrado = Lead.objects.create(name='Borrado Real', phone='0981112233', email='borrado@gmail.com')
+        borrado.soft_delete()
+        call_command('anonymize_for_staging')
+        borrado = Lead.all_objects.get(pk=borrado.pk)
+        assert borrado.email.endswith('@staging.test')
+        assert borrado.name != 'Borrado Real'
+
     def test_payments(self, staging_env, populated):
         call_command('anonymize_for_staging')
         p = Payment.objects.get()
