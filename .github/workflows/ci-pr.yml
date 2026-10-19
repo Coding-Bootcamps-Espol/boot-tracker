@@ -5,14 +5,74 @@ on:
     branches: [main, staging]
   push:
     branches: [main, staging]
+  # Corrida manual: corre todo sin mirar qué archivos cambiaron. Sirve para forzar
+  # un build + deploy (p. ej. el primer despliegue de una rama nueva, o re-desplegar
+  # después de tocar el servidor).
+  workflow_dispatch:
+
+# Un push nuevo a un PR cancela la corrida vieja: no tiene sentido terminar de
+# testear un commit que ya quedó reemplazado. En main y staging NO se cancela
+# (podría cortar un deploy a la mitad): las corridas se encolan de a una.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # GHCR exige el namespace en minúsculas, por eso no sale de github.repository_owner.
 env:
   IMAGE_NS: ghcr.io/coding-bootcamps-espol
 
 jobs:
+  # Decide qué jobs hacen falta según los archivos que cambiaron. Un PR de puros
+  # .md no corre tests, ni build, ni deploy: termina en segundos.
+  #
+  # Los jobs que se saltan por `if:` aparecen como "skipped", y GitHub cuenta un
+  # check requerido skipped como aprobado: la protección de ramas no se traba.
+  changes:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
+      mobile: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.mobile == 'true' }}
+      e2e: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.e2e == 'true' }}
+      app: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.app == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - '.github/workflows/**'
+              - 'backend/**'
+              - 'docker-compose.yml'
+            frontend:
+              - '.github/workflows/**'
+              - 'frontend/**'
+            mobile:
+              - '.github/workflows/**'
+              - 'mobile/**'
+            e2e:
+              - '.github/workflows/**'
+              - 'backend/**'
+              - 'frontend/**'
+              - 'e2e/**'
+              - 'docker-compose.yml'
+            # Lo que cambia la app desplegada. Si nada de esto se tocó no se
+            # construyen imágenes ni se despliega: el servidor sigue en su SHA.
+            app:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'docker-compose.hetzner.yml'
+              - 'docker-compose.staging.yml'
+
   backend-ci:
     name: Backend — Build, Test & Lint
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -83,6 +143,8 @@ jobs:
 
   frontend-ci:
     name: Frontend — Build Check
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -124,6 +186,8 @@ jobs:
 
   mobile-ci:
     name: Mobile — Build & Test
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -158,8 +222,17 @@ jobs:
   # A propósito NO figura en el `needs:` de build-push: un E2E inestable no
   # puede bloquear despliegues en semana de entrega. Se vuelve check requerido
   # recién tras ~10 corridas verdes seguidas.
+  #
+  # Sólo corre en los PRs hacia main (los releases desde staging) y a mano. En los
+  # PRs de trabajo hacia staging serían ~4 min por PR, y staging ya es el lugar
+  # donde se prueba la integración completa.
   e2e-ci:
     name: E2E — Pruebas de aceptación (Playwright)
+    needs: changes
+    if: >-
+      needs.changes.outputs.e2e == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' && github.base_ref == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -283,8 +356,16 @@ jobs:
   # encender el deploy, y ese es justo el orden que no queremos.
   build-push:
     name: Construir y publicar imágenes (GHCR)
-    needs: [backend-ci, frontend-ci]
-    if: github.event_name == 'push'
+    needs: [changes, backend-ci, frontend-ci]
+    # always() hace falta porque backend-ci o frontend-ci pueden venir "skipped"
+    # (p. ej. un cambio sólo de frontend); sin él, un skipped arriba salta esto
+    # también. Lo que sí lo frena: un test fallado o cancelado.
+    if: >-
+      always() &&
+      github.event_name != 'pull_request' &&
+      needs.changes.outputs.app == 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -358,12 +439,16 @@ jobs:
     # antes de que el servidor y los secrets estén listos.
     if: >-
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'push' &&
+      github.event_name != 'pull_request' &&
       vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     # El environment `production` sólo acepta la rama main (Settings → Environments), y
     # la llave de deploy vive ahí: un workflow modificado en otra rama no puede leerla.
     environment: production
+    # packages: read → el GITHUB_TOKEN de esta corrida puede bajar las imágenes privadas.
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       # La llave está restringida en authorized_keys con
@@ -374,12 +459,21 @@ jobs:
       # lo que se envía llega al servidor en $SSH_ORIGINAL_COMMAND, y el script lo lee de
       # ahí y lo valida contra ^[0-9a-f]{40}$ antes de usarlo.
       - name: Desplegar en el VPS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: ${{ github.sha }}
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # El SHA va como "comando" (lo valida deploy.sh) y el token por STDIN, nunca
+        # en la línea de comando: así no queda en logs ni en `ps` del servidor.
+        # Es el GITHUB_TOKEN de esta corrida y vence al terminar el job: en el VPS
+        # no queda guardada ninguna credencial de GHCR.
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf '%s\n%s\n' "${{ github.actor }}" "$GHCR_TOKEN" \
+            | ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$VPS_USER@$VPS_HOST" "${{ github.sha }}"
 
   deploy-staging:
     name: Deploy a staging (VPS Hetzner)
@@ -389,16 +483,28 @@ jobs:
     # aunque el secret se filtre, no puede tocar producción.
     if: >-
       github.ref == 'refs/heads/staging' &&
-      github.event_name == 'push' &&
+      github.event_name != 'pull_request' &&
       vars.STAGING_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: staging
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Desplegar en el VPS (staging)
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.STAGING_VPS_SSH_KEY }}
-          script: ${{ github.sha }}
+        env:
+          SSH_KEY: ${{ secrets.STAGING_VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # El SHA va como "comando" (lo valida deploy.sh) y el token por STDIN, nunca
+        # en la línea de comando: así no queda en logs ni en `ps` del servidor.
+        # Es el GITHUB_TOKEN de esta corrida y vence al terminar el job: en el VPS
+        # no queda guardada ninguna credencial de GHCR.
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf '%s\n%s\n' "${{ github.actor }}" "$GHCR_TOKEN" \
+            | ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$VPS_USER@$VPS_HOST" "${{ github.sha }}"

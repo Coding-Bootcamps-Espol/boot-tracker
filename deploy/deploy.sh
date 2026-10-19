@@ -19,11 +19,23 @@
 #    dataijam). Todo comando lleva -p y -f explícitos para que nunca pueda alcanzarlas.
 #    Prohibido `docker system prune -a` y `docker volume prune`.
 #
+# Imágenes privadas: el pipeline manda por STDIN dos líneas, usuario y token (el
+# GITHUB_TOKEN de la corrida, que vence al terminar el job). Se usan para un
+# `docker login` en un DOCKER_CONFIG temporal que se borra al salir: en el servidor
+# no queda guardada ninguna credencial de GHCR.
+#
 # Uso manual (rollback):  <dir>/deploy.sh <sha-de-40-hex>
+#   Sin token sólo puede usar imágenes que ya estén en el servidor (se conservan las
+#   últimas $RETENER). Para un SHA más viejo, pasarle un token con read:packages:
+#     printf '%s\n%s\n' <usuario> <token> | <dir>/deploy.sh <sha>
 
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# compose resuelve rutas relativas al directorio actual: si se invoca desde un
+# directorio que `deploy` no puede leer (p. ej. /root con sudo), falla con
+# "stat .: permission denied".
+cd "$DIR"
 
 # --- Configuración por entorno (defaults = producción) ------------------------
 PROJECT=boottracker
@@ -61,6 +73,25 @@ fi
 export IMAGE_TAG="$TAG"
 log "[$PROJECT] Desplegando tag: $IMAGE_TAG"
 
+# --- 1b. Credencial efímera de GHCR (opcional, por stdin) ---------------------
+GHCR_USER=""; GHCR_TOKEN=""
+if [ ! -t 0 ]; then
+    IFS= read -r -t 5 GHCR_USER || true
+    IFS= read -r -t 5 GHCR_TOKEN || true
+fi
+PULL_FLAGS=()
+if [ -n "$GHCR_TOKEN" ]; then
+    DOCKER_CONFIG="$(mktemp -d)"; export DOCKER_CONFIG
+    trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+    printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null
+    log "Login efímero en GHCR OK"
+else
+    # Sin credencial no se pueden bajar imágenes privadas: se sigue con las que ya
+    # están en el servidor. Si el tag no está en caché, el `up` de abajo falla.
+    PULL_FLAGS=(--ignore-pull-failures)
+    log "Sin token de GHCR: se usan las imágenes que ya están en el servidor"
+fi
+
 # --- 2. Estado de las OTRAS apps, ANTES ---------------------------------------
 # Se usan las bases y no las APIs a proposito: sus equipos redespliegan las APIs a
 # mano, asi que el StartedAt de una API da falsos positivos. Una base solo se
@@ -96,7 +127,7 @@ done
 
 # --- 4. Traer imagenes ------------------------------------------------------
 log "Bajando imagenes de GHCR..."
-"${COMPOSE[@]}" pull
+"${COMPOSE[@]}" pull "${PULL_FLAGS[@]}"
 
 # --- 5. Levantar ------------------------------------------------------------
 log "Levantando servicios..."
