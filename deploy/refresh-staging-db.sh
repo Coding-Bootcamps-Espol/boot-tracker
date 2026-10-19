@@ -72,4 +72,8 @@ log "5/6 Vaciando el media de staging..."
 
 log "6/6 Levantando staging..."
 "${STG[@]}" up -d
+# Los `compose run` de arriba toman el alias de red `backend`, y el nginx del
+# frontend resuelve ese nombre una sola vez al arrancar: sin este restart queda
+# apuntando a una IP vieja y todo /api/ devuelve 502 (connection refused).
+"${STG[@]}" restart frontend
 log "Listo. Staging tiene un espejo anonimizado de producción."
