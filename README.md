@@ -1,6 +1,6 @@
 # Boot-Tracker
 
-[![CI](https://github.com/Jmuniz27/boot-tracker/actions/workflows/ci-pr.yml/badge.svg)](https://github.com/Jmuniz27/boot-tracker/actions/workflows/ci-pr.yml)
+[![CI](https://github.com/Coding-Bootcamps-Espol/boot-tracker/actions/workflows/ci-pr.yml/badge.svg)](https://github.com/Coding-Bootcamps-Espol/boot-tracker/actions/workflows/ci-pr.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Sistema CRM de seguimiento de leads y pagos para los Coding Bootcamps de ESPOL.
@@ -10,6 +10,7 @@ reportes analíticos.
 
 - **Cliente:** PhD. Carmen Vaca (cvaca@espol.edu.ec)
 - **Producción:** https://boottracker.codingbootcampslatam.com (URL oficial final; el despliegue en `boottracker.taws.espol.edu.ec` se da de baja)
+- **Staging:** https://boottracker-staging.codingbootcampslatam.com — se despliega solo desde la rama `staging`, con un espejo anonimizado de producción
 - **Entrega parcial:** 15 jun 2026 — flujo end-to-end (login → leads → interacciones)
 - **Entrega final:** 17 ago 2026 — producción + docs + handoff
 
@@ -156,7 +157,8 @@ Tipos: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 ### Branches
 
 ```
-main                        — producción estable
+main                        — producción estable (sólo recibe PRs desde staging)
+staging                     — pre-producción: acá apuntan todos los PRs de trabajo
 feat/<numero-issue>-slug    — nuevas funcionalidades  (ej. feat/9-lead-dashboard)
 fix/<numero-issue>-slug     — corrección de bugs      (ej. fix/12-token-expiry)
 chore/<descripcion>         — tareas técnicas

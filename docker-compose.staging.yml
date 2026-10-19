@@ -1,0 +1,37 @@
+# Override de STAGING. Se aplica encima de docker-compose.hetzner.yml:
+#
+#   docker compose -p boottracker-staging \
+#     -f /opt/boot-tracker-staging/docker-compose.hetzner.yml \
+#     -f /opt/boot-tracker-staging/docker-compose.staging.yml <cmd>
+#
+# Agrega Mailpit: un SMTP falso que atrapa TODO el correo que manda staging (reset de
+# contraseña, notificaciones de pagos, invitaciones) y lo muestra en una UI web. Ningún
+# correo de staging puede llegar a una persona real. El .env de staging apunta a él con
+#   EMAIL_HOST=mailpit  EMAIL_PORT=1025  EMAIL_USE_TLS=False
+#
+# La UI queda sólo en loopback; el nginx del host la publica en /mailpit/ con basic auth.
+
+services:
+  mailpit:
+    image: axllent/mailpit:v1.21.8
+    restart: unless-stopped
+    environment:
+      MP_WEBROOT: mailpit
+      MP_MAX_MESSAGES: 2000
+      # Django manda usuario/clave aunque no hagan falta: se acepta cualquiera.
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8086}:8025"
+    networks:
+      - boottracker-network
+
+  backend:
+    depends_on:
+      mailpit:
+        condition: service_started
+
+  celery:
+    depends_on:
+      mailpit:
+        condition: service_started
