@@ -1,0 +1,12 @@
+# Configuración de deploy.sh para STAGING.
+# Destino: /opt/boot-tracker-staging/deploy.conf  (dueño deploy, 640)
+#
+# Producción no necesita este archivo: los defaults de deploy.sh son los suyos.
+
+PROJECT=boottracker-staging
+COMPOSE_FILES="docker-compose.hetzner.yml docker-compose.staging.yml"
+FLOATING_TAG=staging
+GIT_REF=staging
+FRONTEND_PORT=8085
+# Un deploy de staging tampoco puede reiniciar la base de PRODUCCIÓN.
+WATCH="boottracker-db-1 attendance_db cbe_staging_db"

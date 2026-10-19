@@ -171,7 +171,7 @@ All review comments must be written without emojis.
 
 ## Project context
 
-- Repo: `Jmuniz27/boot-tracker`
+- Repo: `Coding-Bootcamps-Espol/boot-tracker`
 - Main branch: `main`
 - Backend tests: `backend/tests/`
 - RBAC: `apps/authentication/permissions.py`

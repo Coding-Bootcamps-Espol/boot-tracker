@@ -152,7 +152,7 @@ boot-tracker/
 ## Convenciones
 
 ### Git
-- **Antes de crear cualquier rama de feature:** hacer `git checkout main && git pull origin main` para partir del HEAD actualizado.
+- **Antes de crear cualquier rama de feature:** hacer `git checkout staging && git pull origin staging` para partir del HEAD actualizado. Los PRs de trabajo apuntan a `staging`; `main` sólo recibe releases desde `staging` (ver CONTRIBUTING.md).
 - Rama: `feat/<numero-issue>-descripcion` (ej. `feat/9-lead-dashboard`)
 - Commit: `feat(leads): add self-assignment endpoint` — sin mencionar herramientas de IA. IMPORTANTE, no incluir "Co-Authored-By".
 - PR: título + número de issue + cómo probar
@@ -266,12 +266,13 @@ Estas reglas no se pueden romper. Si una PR las viola, Claude la rechaza automá
 | Umbral 10% déficit en pagos | `backend/apps/payments/services.py` | No se dispara la alerta al coordinador |
 | RBAC obligatorio en cada endpoint | Todo `APIView`/`ViewSet` debe declarar `permission_classes` | Cualquier usuario accede a datos ajenos |
 | OCR de comprobantes es async | `backend/apps/payments/tasks.py` via Celery — nunca inline en views | Timeout en requests, mala UX |
-| No push directo a `main` | Todas las modificaciones van por PR | Se saltea CI + revisión de Claude |
+| No push directo a `main` ni a `staging` | Todas las modificaciones van por PR | Se saltea CI + revisión de Claude |
 
 ### Flujo Git obligatorio
 
 ```
-feature branch → PR targeting main → CI verde + Claude review aprueba → merge
+feature branch → PR targeting staging → CI verde + review → merge → deploy a staging
+staging → PR targeting main → CI verde + review → merge → deploy a producción
 ```
 
 - Claude puede **rechazar** un PR y debe comentar razones específicas con `file:line`

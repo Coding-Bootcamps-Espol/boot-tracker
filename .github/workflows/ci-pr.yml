@@ -2,9 +2,13 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, staging]
   push:
-    branches: [main]
+    branches: [main, staging]
+
+# GHCR exige el namespace en minúsculas, por eso no sale de github.repository_owner.
+env:
+  IMAGE_NS: ghcr.io/coding-bootcamps-espol
 
 jobs:
   backend-ci:
@@ -303,10 +307,9 @@ jobs:
       # Los builds corren acá y no en el VPS: la caja tiene 2 vCPU y 3.7 GiB
       # compartidos con otra aplicación en producción.
       #
-      # El tag del SHA se publica siempre; `latest`, sólo desde main. Hoy el trigger es
-      # únicamente main, pero la condición se conserva: si alguna vez se vuelve a habilitar
-      # una rama para publicar imágenes de prueba (como se hizo para el primer despliegue),
-      # esa rama no puede mover `latest` y el "sólo main llega a producción" sigue en pie.
+      # El tag del SHA se publica siempre; `latest`, sólo desde main, y `staging`, sólo
+      # desde staging. Así una rama nunca puede mover el tag móvil de la otra y el
+      # "sólo main llega a producción" sigue en pie.
       # El tag del SHA es además lo que hace posible el rollback: deploy.sh <sha-anterior>.
       - name: Build & push backend
         uses: docker/build-push-action@v6
@@ -315,8 +318,9 @@ jobs:
           file: ./backend/Dockerfile.prod
           push: true
           tags: |
-            ghcr.io/jmuniz27/boot-tracker-backend:${{ github.sha }}
-            ${{ github.ref == 'refs/heads/main' && 'ghcr.io/jmuniz27/boot-tracker-backend:latest' || '' }}
+            ${{ env.IMAGE_NS }}/boot-tracker-backend:${{ github.sha }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/boot-tracker-backend:latest', env.IMAGE_NS) || '' }}
+            ${{ github.ref == 'refs/heads/staging' && format('{0}/boot-tracker-backend:staging', env.IMAGE_NS) || '' }}
           # El deploy.sh del servidor limpia imágenes viejas filtrando por esta label.
           # Sin ella, el prune no tendría con qué distinguirlas de las de la otra app.
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
@@ -330,8 +334,9 @@ jobs:
           file: ./frontend/Dockerfile.prod
           push: true
           tags: |
-            ghcr.io/jmuniz27/boot-tracker-frontend:${{ github.sha }}
-            ${{ github.ref == 'refs/heads/main' && 'ghcr.io/jmuniz27/boot-tracker-frontend:latest' || '' }}
+            ${{ env.IMAGE_NS }}/boot-tracker-frontend:${{ github.sha }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/boot-tracker-frontend:latest', env.IMAGE_NS) || '' }}
+            ${{ github.ref == 'refs/heads/staging' && format('{0}/boot-tracker-frontend:staging', env.IMAGE_NS) || '' }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -340,8 +345,8 @@ jobs:
         run: |
           echo "### Imágenes publicadas" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "ghcr.io/jmuniz27/boot-tracker-backend:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "ghcr.io/jmuniz27/boot-tracker-frontend:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.IMAGE_NS }}/boot-tracker-backend:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.IMAGE_NS }}/boot-tracker-frontend:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   deploy:
@@ -356,6 +361,9 @@ jobs:
       github.event_name == 'push' &&
       vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
+    # El environment `production` sólo acepta la rama main (Settings → Environments), y
+    # la llave de deploy vive ahí: un workflow modificado en otra rama no puede leerla.
+    environment: production
 
     steps:
       # La llave está restringida en authorized_keys con
@@ -371,4 +379,26 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          script: ${{ github.sha }}
+
+  deploy-staging:
+    name: Deploy a staging (VPS Hetzner)
+    needs: [build-push]
+    # Mismo patrón que producción, con su propia llave y su propia variable de encendido.
+    # La llave de staging está restringida a command="/opt/boot-tracker-staging/deploy.sh":
+    # aunque el secret se filtre, no puede tocar producción.
+    if: >-
+      github.ref == 'refs/heads/staging' &&
+      github.event_name == 'push' &&
+      vars.STAGING_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Desplegar en el VPS (staging)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.STAGING_VPS_SSH_KEY }}
           script: ${{ github.sha }}

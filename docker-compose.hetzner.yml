@@ -4,7 +4,7 @@
 #   - Usa imágenes ya construidas desde GHCR en vez de `build:`. Los builds corren en
 #     GitHub Actions porque el VPS tiene 2 vCPU y 3.7 GiB compartidos con otra app en
 #     producción: un `npm ci` + `vite build` pica 1–1.5 GiB y la dejaría lenta.
-#   - `frontend` publica en 127.0.0.1:8080 para que el nginx del host lo alcance.
+#   - `frontend` publica en 127.0.0.1:${FRONTEND_PORT} para que el nginx del host lo alcance.
 #     Con `expose` a secas no es accesible desde fuera de la red de Docker.
 #   - db y redis no publican ningún puerto: viven sólo dentro de la red del proyecto.
 #
@@ -15,6 +15,14 @@
 #
 # El prefijo `boottracker` aísla volúmenes y red. NUNCA correr `docker system prune -a`
 # ni `docker volume prune` en ese host: borran por "huérfano", no por proyecto.
+#
+# El mismo archivo sirve a producción y a staging. Lo que cambia entre ambos viene del
+# `.env` de cada directorio, y los defaults son los de producción:
+#   FRONTEND_PORT     (8080)   puerto en loopback al que apunta el nginx del host
+#   GUNICORN_WORKERS  (2)      staging usa 1 para no competir por RAM
+#   CELERY_CONCURRENCY (2)
+#   IMAGE_NAMESPACE   (ghcr.io/coding-bootcamps-espol)
+# Staging suma además docker-compose.staging.yml (Mailpit). Ver deploy/README.md.
 
 services:
   db:
@@ -50,7 +58,7 @@ services:
   # cambia nada. No se puede borrar hasta confirmar que ningún entorno arrastra un
   # media_data root-owned.
   media-permissions:
-    image: ghcr.io/jmuniz27/boot-tracker-backend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-ghcr.io/coding-bootcamps-espol}/boot-tracker-backend:${IMAGE_TAG:-latest}
     user: root
     command: chown -R appuser:appgroup /app/media
     volumes:
@@ -60,12 +68,12 @@ services:
       - boottracker-network
 
   backend:
-    image: ghcr.io/jmuniz27/boot-tracker-backend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-ghcr.io/coding-bootcamps-espol}/boot-tracker-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: >
       bash -c "python manage.py collectstatic --noinput &&
                python manage.py migrate &&
-               gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"
+               gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-2} --timeout 120"
     expose:
       - "8000"
     env_file:
@@ -81,7 +89,7 @@ services:
       - boottracker-network
     volumes:
       - media_data:/app/media
-      - /opt/boot-tracker/google-credentials.json:/app/google-credentials.json:ro
+      - ./google-credentials.json:/app/google-credentials.json:ro
     healthcheck:
       # /health/ verifica ademas que la BD conteste (config/health.py).
       #
@@ -98,9 +106,9 @@ services:
       start_period: 90s
 
   celery:
-    image: ghcr.io/jmuniz27/boot-tracker-backend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-ghcr.io/coding-bootcamps-espol}/boot-tracker-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    command: celery -A config.celery_app worker --loglevel=info
+    command: celery -A config.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-2}
     env_file:
       - .env
     depends_on:
@@ -114,7 +122,7 @@ services:
       - boottracker-network
     volumes:
       - media_data:/app/media
-      - /opt/boot-tracker/google-credentials.json:/app/google-credentials.json:ro
+      - ./google-credentials.json:/app/google-credentials.json:ro
     healthcheck:
       # `inspect ping` pregunta al worker por el broker: si Redis se cae o el
       # worker queda colgado, deja de responder aunque el proceso siga vivo.
@@ -137,12 +145,12 @@ services:
   # worker por sí solo no ejecuta nada programado.
 
   frontend:
-    image: ghcr.io/jmuniz27/boot-tracker-frontend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-ghcr.io/coding-bootcamps-espol}/boot-tracker-frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     # Sólo loopback: el nginx del host es el único que debe alcanzarlo.
     # Nunca 0.0.0.0 — el puerto 8080 no se abre en el firewall.
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
     depends_on:
       - backend
     networks:
