@@ -11,7 +11,7 @@ flowchart TB
 
     subgraph CICD["Continuous Delivery - GitHub"]
         direction LR
-        Repo["Repository Jmuniz27/T5BootTracker<br/>main = single source of truth"]:::ci
+        Repo["Repository Coding-Bootcamps-Espol/boot-tracker<br/>main = single source of truth"]:::ci
         Actions["GitHub Actions - ci-pr.yml<br/>backend-ci · frontend-ci · mobile-ci · e2e-ci<br/>gates: ruff · ESLint+SonarJS · bandit · coverage"]:::ci
         GHCR[("GHCR<br/>images tagged by commit SHA")]:::ci
     end
